@@ -1,0 +1,87 @@
+#
+# VE Driver Library
+#
+# Copyright (C) 2017-2018 NEC Corporation
+# This file is part of the VE Driver Library.
+#
+# The VE Driver Library is free software; you can redistribute it
+# and/or modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either version
+# 2.1 of the License, or (at your option) any later version.
+#
+# The VE Driver Library is distributed in the hope that it will be
+# useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+# of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with the VE Driver Library; if not, see
+# <http://www.gnu.org/licenses/>.
+#
+
+Name:		@PACKAGE@
+Version:	@VERSION@
+Release:	@RELEASE@
+Summary:	Library for VE Driver
+Group:		System Environment/Libraries
+License:	LGPL
+Source0:	@PACKAGE@-@VERSION@.tar.gz
+Vendor:		NEC Corporation
+Packager:	Toshikazu Aoyama <t-aoyama@ap.jp.nec.com>
+BuildArch:	x86_64
+BuildRequires:	ve_drv-kmod-devel >= 0.4.1
+BuildRequires:	vp-kmod-devel >= 0.4.1
+BuildRequires:	systemd-devel >= 219
+BuildRequires:	glibc-headers >= 2.17
+Requires:	systemd-libs >= 219
+Requires:	glibc >= 2.17
+
+%description
+libved is a library for VE Driver.
+
+%package        devel
+Summary:        Headers for building apps that use libved library
+Group:          System Environment/Libraries
+Requires:       %{name} = %{version}-%{release}
+
+%description    devel
+This package contains header required to build applications that
+use libved library
+
+%define _prefix @prefix@
+
+%prep
+%setup -q
+
+%build
+%configure
+make %{?_smp_mflags}
+
+%install
+%{__rm} -rf $RPM_BUILD_ROOT
+make install DESTDIR=$RPM_BUILD_ROOT
+
+%clean
+%{__rm} -rf $RPM_BUILD_ROOT
+
+%post
+/sbin/ldconfig
+%postun
+/sbin/ldconfig
+
+%files
+%defattr(-,root,root,-)
+%doc
+%{_libdir}/*.so.*
+
+%files devel
+%defattr(-,root,root,-)
+%doc
+%{_includedir}/*.h
+%{_libdir}/*.a
+%{_libdir}/*.la
+%{_libdir}/*.so
+#%{_libdir}/pkgconfig/%{name}.pc
+#%{_datadir}/aclocal/*.m4
+
+%changelog
