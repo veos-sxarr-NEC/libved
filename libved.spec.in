@@ -21,7 +21,7 @@
 
 Name:		@PACKAGE@
 Version:	@VERSION@
-Release:	@RELEASE@
+Release:	@RELEASE@%{?dist}
 Summary:	Library for VE Driver
 Group:		System Environment/Libraries
 License:	LGPL

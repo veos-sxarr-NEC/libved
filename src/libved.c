@@ -116,6 +116,7 @@ vedl_handle *vedl_open_ve(const char *filename, int fd)
 	return handle;
 
  abi_err:
+	udev_device_unref(handle->udev);
  udev_err:
  fstat_err:
 	close(handle->vefd);
@@ -148,6 +149,7 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 
 	/* copy handle */
 	memcpy(new_handle, p_handle, sizeof(vedl_handle));
+	udev_device_ref(new_handle->udev);
 
 	if (fname)
 		ret = snprintf(proclnk, PATH_MAX, "%s", fname);
@@ -170,6 +172,7 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 
  err_open:
  err_snprintf:
+	udev_device_unref(new_handle->udev);
 	free(new_handle);
 	errno = errsv;
 	return NULL;
@@ -190,6 +193,7 @@ int vedl_close_ve(vedl_handle *handle)
 	ret = close(handle->vefd);
 	if (ret)
 		goto err;
+	udev_device_unref(handle->udev);
 	free(handle);
  err:
 	return ret;
