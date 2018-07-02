@@ -124,6 +124,7 @@ vedl_handle *vedl_open_ve(const char *filename, int fd)
 	free(handle);
  malloc_err:
 	errno = errsv;
+	udev_unref(udev);
 	return NULL;
 }
 
@@ -140,6 +141,7 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 {
 	vedl_handle *new_handle;
 	char proclnk[PATH_MAX];
+	struct udev *udev;
 	int ret;
 	int errsv = 0;
 
@@ -149,7 +151,11 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 
 	/* copy handle */
 	memcpy(new_handle, p_handle, sizeof(vedl_handle));
+	udev = udev_device_get_udev(new_handle->udev);
+	if(udev == NULL)
+		goto err_get_udev;
 	udev_device_ref(new_handle->udev);
+	udev_ref(udev);
 
 	if (fname)
 		ret = snprintf(proclnk, PATH_MAX, "%s", fname);
@@ -172,7 +178,9 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 
  err_open:
  err_snprintf:
+	udev_unref(udev);
 	udev_device_unref(new_handle->udev);
+ err_get_udev:
 	free(new_handle);
 	errno = errsv;
 	return NULL;
@@ -189,10 +197,14 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 int vedl_close_ve(vedl_handle *handle)
 {
 	int ret;
-
+	struct udev *udev; 
+	
 	ret = close(handle->vefd);
 	if (ret)
 		goto err;
+
+	udev = udev_device_get_udev(handle->udev);
+	udev_unref(udev);
 	udev_device_unref(handle->udev);
 	free(handle);
  err:
