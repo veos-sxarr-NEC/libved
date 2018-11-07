@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([libved], [1.2.0], [t-aoyama@ap.jp.nec.com])
+AC_INIT([libved], [1.3.1], [t-aoyama@ap.jp.nec.com])
 AC_CONFIG_SRCDIR([src/libved.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([./build-aux])
@@ -21,6 +21,14 @@ AC_ARG_WITH([release-id], [AS_HELP_STRING([--with-release-id],
             [Specify release id])],
             [RELEASE=${with_release_id}],
             [RELEASE="1"])
+AC_ARG_WITH([no-memcpy], [AS_HELP_STRING([--with-no-memcpy],
+	[Without memcpy option])],
+	[NO_MEMCPY=${with_no_memcpy}],
+	[NO_MEMCPY="0"])
+AS_IF([test "$NO_MEMCPY" != 0],
+	[CFLAGS=$CFLAGS" -DNO_MEMCPY"])
+AC_SUBST(NO_MEMCPY)
+
 CPPFLAGS=$CPPFLAGS" -I${with_veos}/include"
 # Checks for programs.
 AC_PROG_CC
@@ -53,5 +61,9 @@ AC_CHECK_FUNCS([strerror strtol strtoul strtoull])
 
 AC_CONFIG_FILES([Makefile
 		 libved.spec
-		 src/Makefile])
+		 src/Makefile
+		 debian/rules
+		 debian/control
+		 debian/libved.install
+		 debian/libved-dev.install])
 AC_OUTPUT

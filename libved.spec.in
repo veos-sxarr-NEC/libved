@@ -54,7 +54,7 @@ use libved library
 %setup -q
 
 %build
-%configure
+%configure --with-no-memcpy=@NO_MEMCPY@
 make %{?_smp_mflags}
 
 %install

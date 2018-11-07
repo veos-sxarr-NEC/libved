@@ -1,0 +1,31 @@
+Source: @PACKAGE@
+Section: otherosfs
+Priority: extra
+Maintainer: NEC Corporation
+Build-Depends: debhelper (>=10),
+               dh-autoreconf,
+	       dh-systemd,
+	       ve-drv-kmod-dev (>=0.4.1),
+	       vp-kmod-dev (>=0.4.1),
+	       libsystemd-dev (>=219),
+	       libc6-dev (>=2.17)
+Standards-Version: 3.9.8
+
+Package: @PACKAGE@
+Architecture: any
+Multi-Arch: same
+Depends: ${misc:Depends},
+	 ${shlibs:Depends},
+	 libsystemd0 (>=219),
+	 libc6 (>=2.17)
+Pre-Depends: ${misc:Pre-Depends}
+Description: libved is a library for VE Driver.
+
+Package: @PACKAGE@-dev
+Architecture: any
+Multi-Arch: same
+Depends: ${misc:Depends},
+         @PACKAGE@ (= @VERSION@-@RELEASE@)
+Description: devel
+This package contains header required to build applications that
+use libved library

@@ -23,6 +23,7 @@ AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = src
 dist_noinst_DATA = libved.spec
+EXTRA_DIST = debian
 
 rpm: dist
 	mkdir -p $(distdir)/rpmbuild/{BUILD,RPMS,SOURCES,SRPMS,SPECS}

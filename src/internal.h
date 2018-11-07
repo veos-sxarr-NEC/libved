@@ -61,12 +61,22 @@ static inline int _read_reg(vedl_handle *handle, void *from_addr,
 			     off_t offset, void *to_addr, size_t size)
 {
 	int err = 0;
+#ifdef NO_MEMCPY
+	size_t now;
+	uint64_t *from8 = (uint64_t *)(from_addr + offset);
+	uint64_t *to8 = (uint64_t *)to_addr;
+#endif
 
 	err = _check_size_offset(offset, size);
 	if (err)
 		return err;
 	/* read reg */
+#ifdef NO_MEMCPY
+	for (now = 0; now < size; now += 8)
+		*to8++ = *from8++;
+#else
 	memcpy(to_addr, (void *)(from_addr + offset), size);
+#endif
 
 	return 0;
 }
@@ -88,12 +98,22 @@ static inline int _write_reg(vedl_handle *handle, void *to_addr,
 			      off_t offset, void *from_addr, size_t size)
 {
 	int err = 0;
+#ifdef NO_MEMCPY
+	size_t now;
+	uint64_t *to8 = (uint64_t *)(to_addr + offset);
+	uint64_t *from8 = (uint64_t *)from_addr;
+#endif
 
 	err = _check_size_offset(offset, size);
 	if (err)
 		return err;
 	/* write reg */
+#ifdef NO_MEMCPY
+	for(now = 0; now < size; now +=8)
+		*to8++ = *from8++;	
+#else
 	memcpy((void *)(to_addr + offset), from_addr, size);
+#endif
 
 	return 0;
 }
