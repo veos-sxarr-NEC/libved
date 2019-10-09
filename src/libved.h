@@ -271,6 +271,9 @@ int vedl_assign_ve_task(vedl_handle *handle, int core_id, pid_t tid);
 int vedl_unassign_ve_task(vedl_handle *handle, pid_t tid);
 uint64_t vedl_get_dma_address(vedl_handle *handle, void *addr, pid_t pid,
 		int pin_down, int write, int *pfnmap);
+int vedl_get_addr_pin_blk(vedl_handle *handle, pid_t pid, uint64_t vaddr,
+			  uint64_t *length, uint64_t *paddr, uint32_t maxpages,
+			  uint32_t *npages, int *pgsz, int pin_down, int write);
 uint64_t vedl_get_dma_address2(vedl_handle *handle, void *addr, pid_t pid,
 		int pin_down, int write, int *pfnmap);
 int vedl_reset_interrupt_count(vedl_handle *handle, uint64_t core_id);
@@ -294,6 +297,8 @@ int vedl_release_pindown_page(vedl_handle *handle, unsigned long addr);
 int vedl_release_pindown_page2(vedl_handle *handle, unsigned long addr);
 int vedl_release_pindown_page_all(vedl_handle *handle);
 int vedl_release_pindown_page_all2(vedl_handle *handle);
+int vedl_release_pindown_page_blk(vedl_handle *handle, uint64_t *addr,
+				  int npages);
 int vedl_wait_interrupt(vedl_handle *handle, msix_entry_t entry,
 		struct timespec *timeout);
 core_user_reg_t *vedl_mmap_usr_reg(vedl_handle *handle, int core_id);
@@ -302,6 +307,7 @@ system_common_reg_t *vedl_mmap_cnt_reg(vedl_handle *handle);
 int vedl_unmap_mmio(vedl_handle *handle, off_t offset, size_t size);
 int vedl_update_firmware(vedl_handle *handle);
 int vedl_reset_ve_chip(vedl_handle *handle, int sbr);
+pid_t vedl_host_pid(vedl_handle *handle, pid_t host_pid, pid_t namespace_pid);
 #if defined(__cplusplus)
 }
 #endif

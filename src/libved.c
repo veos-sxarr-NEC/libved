@@ -419,6 +419,54 @@ uint64_t vedl_get_dma_address(vedl_handle *handle, void *addr, pid_t pid,
 			write, pfnmap);
 }
 
+/** 
+ * @brief bulk translate virtual addresses to physical addresses
+ *
+ * @param[in] handle 	VEDL handle
+ * @param[in] pid 	PID to translate
+ * @param[in] vaddr 	virtual addresses to translate
+ * @param[inout] length	pointer to length of pin downed memory
+ * @param[out] paddr	pointer to the list of physical addresses
+ * @param[in] maxpages	the upper limit of the number of pin downed pages
+ * @param[out] npages	pointer to the number of pin downed pages
+ * @param[out] pgsz	pointer to the memory page size  
+ * @param[in] pin_down 	set 1 to pin down the page on the memory
+ * @param[in] write 	set 1 to check if the page is writable
+ *
+ * @return zero on success
+ *         negative value on failure.
+ *         errno:
+ *           EPERM   The caller is not permitted
+ *           ESRCH   Invalid PID
+ *           ENOMEM  No enough memory or failed to pin down page
+ */
+int vedl_get_addr_pin_blk(vedl_handle *handle, pid_t pid, uint64_t vaddr,
+			  uint64_t *length, uint64_t *paddr, uint32_t maxpages,
+			  uint32_t *npages, int *pgsz, int pin_down, int write)
+{
+	int retval;
+	struct ve_vp_blk ve_arg;
+
+	ve_arg.type = OS_LIST;
+	ve_arg.vp_info.pid = pid;
+	ve_arg.vp_info.write = write;
+	ve_arg.vp_info.vaddr = vaddr;
+	ve_arg.vp_info.length = *length;
+	ve_arg.vp_info.paddr = paddr;
+	ve_arg.vp_info.maxpages = maxpages;
+	if (pin_down)
+		retval = ioctl(handle->vefd, VEDRV_CMD_VHVA_TO_VSAA_BLK_PIN_DOWN,
+				&ve_arg);
+	else
+		retval = ioctl(handle->vefd, VEDRV_CMD_VHVA_TO_VSAA_BLK, &ve_arg);
+	if (retval)
+		return retval;
+	*pgsz = ve_arg.vp_info.pgsz;
+	*length = ve_arg.vp_info.length;
+	*npages = ve_arg.vp_info.npages;
+	return 0;
+}
+
 /**
  * @brief return physical address of process virtual address for MMM, T&D
  *
@@ -822,6 +870,30 @@ int vedl_release_pindown_page_all2(vedl_handle *handle)
 }
 
 /**
+ * @brief Bulk release (count down) pinned down pages
+ *
+ * @param[in] handle VEDL handler
+ * @param addr pointer to list of physical (page) addresses
+ * @param npages number of pages in list
+ *
+ * @return 0 on success. negative on failure.
+ *         errno:
+ *           EINVAL Invalid address.
+ *           ESRCH  The page is not pinned
+ */
+int vedl_release_pindown_page_blk(vedl_handle *handle, uint64_t *addr,
+				  int npages)
+{
+	struct ve_vp_blk_release arg;
+
+	arg.type = OS_LIST;
+	arg.addr = addr;
+	arg.npages = npages;
+
+	return ioctl(handle->vefd, VEDRV_CMD_RELEASE_PD_PAGE_BLK, &arg);
+}
+
+/**
  * @brief wait for interuption
  *
  * @detail
@@ -978,4 +1050,28 @@ int vedl_update_firmware(vedl_handle *handle)
 int vedl_reset_ve_chip(vedl_handle *handle, int sbr)
 {
 	return ioctl(handle->vefd, VEDRV_CMD_VE_RESET, sbr);
+}
+
+/**
+ * @brief Get host pid
+ * @detail This function get the host pid which is converted
+ * 	   from namespace_pid. First, find name space from
+ * 	   host_pid. After that, find task from name space
+ * 	   and namespace_pid. Finaly, get the host pid which
+ * 	   is converted from namespace_pid.
+ *
+ * @param[in] handle VEDL handle
+ * @param[in] host_pid The host pid in the host to identify the namespace.
+ * @param[in] namespace_pid The namespace pid to be converted.
+ *
+ * @return The host pid.
+ */
+pid_t vedl_host_pid(vedl_handle *handle, pid_t host_pid, pid_t namespace_pid)
+{
+	struct ve_get_host_pid arg;
+	
+	arg.host_pid = host_pid;
+	arg.namespace_pid = namespace_pid;
+
+	return ioctl(handle->vefd, VEDRV_CMD_HOST_PID, &arg);
 }
