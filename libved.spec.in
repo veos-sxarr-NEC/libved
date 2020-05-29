@@ -60,6 +60,8 @@ make %{?_smp_mflags}
 %install
 %{__rm} -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
+sh -c "rm -f ${RPM_BUILD_ROOT}%{_libdir}/lib*.a \
+      ${RPM_BUILD_ROOT}%{_libdir}/lib*.la"
 
 %clean
 %{__rm} -rf $RPM_BUILD_ROOT
@@ -78,8 +80,6 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %defattr(-,root,root,-)
 %doc
 %{_includedir}/*.h
-%{_libdir}/*.a
-%{_libdir}/*.la
 %{_libdir}/*.so
 #%{_libdir}/pkgconfig/%{name}.pc
 #%{_datadir}/aclocal/*.m4

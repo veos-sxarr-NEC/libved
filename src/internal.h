@@ -45,6 +45,27 @@ static inline int _check_size_offset(off_t offset, size_t size)
 }
 
 /**
+ * @brief Check size and offset of MMIO of 1 word (8 bytes)
+ *
+ * @param offset offset from top address
+ * @param size size to transfer
+ *
+ * @return 0 on success.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+static inline int _check_size_offset_word(off_t offset, size_t size)
+{
+	/* size must be 8byte */
+	if (size != 8)
+		return -1;
+	/* offset must be 8byte align */
+	if (offset % 8 || offset < 0)
+		return -2;
+	return 0;
+}
+
+/**
  * @brief read register
  *
  * @param[in] handle VEDL handler
@@ -82,6 +103,33 @@ static inline int _read_reg(vedl_handle *handle, void *from_addr,
 }
 
 /**
+ * @brief read register 1 word
+ *
+ * @param[in] handle VEDL handler
+ * @param[in] from_addr register mapped address
+ * @param offset offset from from_addr
+ * @param[out] to_addr buffer for writing
+ * @param size size to read (must be 8 bytes)
+ *
+ * @return 0 on success.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+static inline int _read_reg_word(vedl_handle *handle, void *from_addr,
+			     off_t offset, void *to_addr, size_t size)
+{
+	int err = 0;
+	uint64_t *from8 = (uint64_t *)(from_addr + offset);
+	uint64_t *to8 = (uint64_t *)to_addr;
+
+	err = _check_size_offset_word(offset, size);
+	if (err)
+		return err;
+	*to8 = *from8;
+	return 0;
+}
+
+/**
  * @brief write register
  *
  * @param[in] handle VEDL handler
@@ -115,6 +163,33 @@ static inline int _write_reg(vedl_handle *handle, void *to_addr,
 	memcpy((void *)(to_addr + offset), from_addr, size);
 #endif
 
+	return 0;
+}
+
+/**
+ * @brief write register 1 word
+ *
+ * @param[in] handle VEDL handler
+ * @param[in] to_addr register mapped address
+ * @param offset offset from to_addr
+ * @param[in] from_addr buffer for writing
+ * @param size size to write (must be 8 bytes)
+ *
+ * @return 0 on success.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+static inline int _write_reg_word(vedl_handle *handle, void *to_addr,
+			      off_t offset, void *from_addr, size_t size)
+{
+	int err = 0;
+	uint64_t *to8 = (uint64_t *)(to_addr + offset);
+	uint64_t *from8 = (uint64_t *)from_addr;
+
+	err = _check_size_offset_word(offset, size);
+	if (err)
+		return err;
+	*to8 = *from8;
 	return 0;
 }
 

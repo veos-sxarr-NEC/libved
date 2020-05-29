@@ -50,7 +50,7 @@ int vedl_get_usr_reg(vedl_handle *handle, core_user_reg_t *addr,
 	if (offset < 0)
 		return -3;
 
-	return vedl_get_usr_reg_words(handle, addr, offset, regdata,
+	return _read_reg_word(handle, addr, offset, regdata,
 			sizeof(reg_t));
 }
 
@@ -91,7 +91,7 @@ int vedl_set_usr_reg(vedl_handle *handle, core_user_reg_t *addr,
 	if (offset < 0)
 		return -3;
 
-	return vedl_set_usr_reg_words(handle, addr, offset, &regdata,
+	return _write_reg_word(handle, addr, offset, &regdata,
 			sizeof(reg_t));
 }
 
@@ -132,7 +132,7 @@ int vedl_get_sys_reg(vedl_handle *handle, core_system_reg_t *addr,
 	if (offset < 0)
 		return -3;
 
-	return vedl_get_sys_reg_words(handle, addr, offset, regdata,
+	return _read_reg_word(handle, addr, offset, regdata,
 			sizeof(reg_t));
 }
 
@@ -174,7 +174,7 @@ int vedl_set_sys_reg(vedl_handle *handle, core_system_reg_t *addr,
 	if (offset < 0)
 		return -3;
 
-	return vedl_set_sys_reg_words(handle, addr, offset, &regdata,
+	return _write_reg_word(handle, addr, offset, &regdata,
 			sizeof(reg_t));
 }
 
@@ -299,7 +299,7 @@ int vedl_update_atb_entry(vedl_handle *handle, core_system_reg_t *addr,
 	    atb_offset + offsetof(atb_reg_t, entry[dirnum][entnum]);
 
 	/* update 1 entry */
-	return vedl_set_sys_reg_words(handle, addr, atb_entry_offset, entry,
+	return _write_reg_word(handle, addr, atb_entry_offset, entry,
 		   sizeof(atb_entry_t));
 }
 
@@ -318,7 +318,7 @@ int vedl_update_atb_entry(vedl_handle *handle, core_system_reg_t *addr,
 int vedl_set_cnt_reg_word(vedl_handle *handle, system_common_reg_t *to,
 		off_t offset, reg_t val)
 {
-	return vedl_set_cnt_reg_words(handle, to, offset, &val, sizeof(val));
+	return _write_reg_word(handle, to, offset, &val, sizeof(val));
 }
 
 /**
@@ -336,7 +336,7 @@ int vedl_set_cnt_reg_word(vedl_handle *handle, system_common_reg_t *to,
 int vedl_get_cnt_reg_word(vedl_handle *handle, system_common_reg_t *from,
 		off_t offset, reg_t *valp)
 {
-	return vedl_get_cnt_reg_words(handle, from, offset, valp,
+	return _read_reg_word(handle, from, offset, valp,
 			sizeof(valp));
 }
 
@@ -444,7 +444,7 @@ int vedl_update_dmaatb_entry(vedl_handle *handle, system_common_reg_t *addr,
 						 entry[dirnum][entnum]);
 
 	/* update 1 entry */
-	return vedl_set_cnt_reg_words(handle, addr, atb_entry_offset, entry,
+	return _write_reg_word(handle, addr, atb_entry_offset, entry,
 		   sizeof(atb_entry_t));
 }
 
@@ -504,6 +504,6 @@ int vedl_update_pciatb_entry(vedl_handle *handle, system_common_reg_t *addr,
 	atb_entry_offset = offsetof(system_common_reg_t, pciatb[entnum]);
 
 	/* update 1 entry */
-	return vedl_set_cnt_reg_words(handle, addr, atb_entry_offset, entry,
+	return _write_reg_word(handle, addr, atb_entry_offset, entry,
 		   sizeof(atb_entry_t));
 }
