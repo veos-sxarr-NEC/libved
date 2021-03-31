@@ -642,7 +642,7 @@ int vedl_read_from_sysfs(vedl_handle *handle, const char *fname, char *str,
 		return retval;
 
  again:
-	readlen = read(fd, str, length);
+	readlen = read(fd, str, length - 1);
 	if (readlen < 0) {
 		if (errno == EINTR)
 			goto again;
@@ -653,6 +653,7 @@ int vedl_read_from_sysfs(vedl_handle *handle, const char *fname, char *str,
 			return readlen;
 		}
 	}
+	str[readlen] = '\0';
 	retval = close(fd);
 
 	return retval;
