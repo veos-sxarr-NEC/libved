@@ -22,6 +22,32 @@
 #if !defined(__LIBVED_INTERNAL_H)
 #define __LIBVED_INTERNAL_H
 
+#include <cpuid.h>
+
+static inline void *rep_movs(void *to, const void *from, size_t n)
+{
+        asm volatile("rep ; movsq"
+                        : "=&c" (n), "=&D" (to), "=&S" (from)
+                        : "0" (n / 8), "q" (n), "1" ((uint64_t)to), "2" ((uint64_t)from)
+                        : "memory");
+        return to;
+}
+
+static inline int is_ssse3()
+{
+        unsigned int a,b,c,d;
+        static int bit_ssse3_on=0;
+        static int check_once=1;
+
+        if ( check_once ){
+                a=b=c=d=0;
+                __get_cpuid( 1, &a, &b, &c, &d);
+                bit_ssse3_on = (c & bit_SSSE3);
+                check_once = 0;
+        }
+        return bit_ssse3_on;
+}
+
 /**
  * @brief Check size and offset of MMIO
  *
@@ -82,6 +108,7 @@ static inline int _read_reg(vedl_handle *handle, void *from_addr,
 			     off_t offset, void *to_addr, size_t size)
 {
 	int err = 0;
+
 #ifdef NO_MEMCPY
 	size_t now;
 	uint64_t *from8 = (uint64_t *)(from_addr + offset);
@@ -96,7 +123,12 @@ static inline int _read_reg(vedl_handle *handle, void *from_addr,
 	for (now = 0; now < size; now += 8)
 		*to8++ = *from8++;
 #else
-	memcpy(to_addr, (void *)(from_addr + offset), size);
+
+	if(size <= 4096 && is_ssse3() ){
+		memcpy(to_addr, (void *)(from_addr + offset), size);
+	} else {
+		rep_movs(to_addr, (void *)(from_addr + offset), size);
+	}
 #endif
 
 	return 0;
@@ -146,6 +178,7 @@ static inline int _write_reg(vedl_handle *handle, void *to_addr,
 			      off_t offset, void *from_addr, size_t size)
 {
 	int err = 0;
+
 #ifdef NO_MEMCPY
 	size_t now;
 	uint64_t *to8 = (uint64_t *)(to_addr + offset);
@@ -160,7 +193,12 @@ static inline int _write_reg(vedl_handle *handle, void *to_addr,
 	for(now = 0; now < size; now +=8)
 		*to8++ = *from8++;	
 #else
-	memcpy((void *)(to_addr + offset), from_addr, size);
+
+	if(size <= 4096 && is_ssse3() ){
+		memcpy((void *)(to_addr + offset), from_addr, size);
+	} else {
+		rep_movs((void *)(to_addr + offset), from_addr, size);
+	}
 #endif
 
 	return 0;
