@@ -19,27 +19,19 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __VE_HW_H
-#define __VE_HW_H
+#if !defined(__LIBVED_INTERNAL_VE1_H)
+#define __LIBVED_INTERNAL_VE1_H
 
+extern const struct vedl_arch_class _vedl_ve1_arch_class;
+#define IS_VE1(hdl) \
+	(hdl->arch_class == &_vedl_ve1_arch_class)
 
-#include <stdint.h>
+/* register_ve1.c */
+int _vedl_ve1_get_user_regs_area(int, int, struct reg_area *);
+int _vedl_ve1_get_sys_regs_area(int, int, struct reg_area *);
+int _vedl_ve1_get_common_regs_area(int, struct reg_area *);
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+int _vedl_ve1_get_usr_offset(ve_usr_reg_name_t, int *, off_t *);
+int _vedl_ve1_get_sys_offset(ve_sys_reg_name_t, int *, off_t *);
 
-typedef uint64_t ve_reg_t;
-
-#if defined(_VE_ARCH_VE3_)
-#include <ve_hw_ve3.h>
-#elif defined(_VE_ARCH_VE1_)
-#include <ve_hw_ve1.h>
-#else
-#error "specify _VE_ARCH_VE3_ or _VE_ARCH_VE1_"
-#endif
-
-#if defined(__cplusplus)
-}
-#endif
-#endif
+#endif	/* if !defined(__LIBVED_INTERNAL_VE1_H) */

@@ -1,7 +1,7 @@
 /*
  * VE Driver Library
  *
- * Copyright (C) 2017-2018 NEC Corporation
+ * Copyright (C) 2017-2020 NEC Corporation
  * This file is part of the VE Driver Library.
  *
  * The VE Driver Library is free software; you can redistribute it
@@ -22,301 +22,97 @@
 #if !defined(__LIBVED_INTERNAL_H)
 #define __LIBVED_INTERNAL_H
 
-#include <cpuid.h>
+#include <ve_drv.h>
 
-static inline void *rep_movs(void *to, const void *from, size_t n)
-{
-        asm volatile("rep ; movsq"
-                        : "=&c" (n), "=&D" (to), "=&S" (from)
-                        : "0" (n / 8), "q" (n), "1" ((uint64_t)to), "2" ((uint64_t)from)
-                        : "memory");
-        return to;
-}
 
-static inline int is_ssse3()
-{
-        unsigned int a,b,c,d;
-        static int bit_ssse3_on=0;
-        static int check_once=1;
+struct vedl_arch_class;
+/**
+ * @brief handle structure for library functions.
+ */
+struct vedl_handle_struct {
+	int vefd;		/*!<
+				 * vefd is device file descriptor.
+				 * Device file descriptor have to be different
+				 * among threads.
+				 */
+	uint64_t *lshm_addr;	/*!< LHM/SHM area */
+	off_t offset;		/*!<
+				 * syscall area offset from top of
+				 * LHM/SHM area.
+				 * This value must be updated at the time of
+				 * thread/process creation.
+				 */
+	struct udev_device *udev;	/*!< sysfs udev device */
+	const struct vedl_arch_class *arch_class;/*!< VE architecture class */
+};
 
-        if ( check_once ){
-                a=b=c=d=0;
-                __get_cpuid( 1, &a, &b, &c, &d);
-                bit_ssse3_on = (c & bit_SSSE3);
-                check_once = 0;
-        }
-        return bit_ssse3_on;
-}
+
+struct mapped_area {
+	void *start;
+	size_t size;
+};
+
+struct reg_area_set {
+	size_t num_areas;
+	struct mapped_area *areas;
+};
+
+struct vedl_user_reg_handle_struct {
+	struct reg_area_set user_regs;
+	int (*get_usr_offset)(ve_usr_reg_name_t, int *, off_t *);
+};
+struct vedl_sys_reg_handle_struct {
+	struct reg_area_set sys_regs;
+	int (*get_sys_offset)(ve_sys_reg_name_t, int *, off_t *);
+};
+
+struct vedl_common_reg_handle_struct {
+	struct reg_area_set common_regs;
+	const void *arch_class;
+};
 
 /**
- * @brief Check size and offset of MMIO
- *
- * @param offset offset from top address
- * @param size size to transfer
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
+ * where to map register area; passed to mmap.
  */
-static inline int _check_size_offset(off_t offset, size_t size)
-{
-	/* size must be multiple of 8byte */
-	if (size % 8)
-		return -1;
-	/* offset must be 8byte align */
-	if (offset % 8 || offset < 0)
-		return -2;
+struct reg_area {
+	off_t offset;
+	size_t size;
+};
 
-	return 0;
-}
+struct vedl_arch_class {
+	char name[VEDRV_ARCH_CLASS_NAME_MAX];
+	unsigned int bars_map;
+	size_t num_user_regs_area;	/*!< # of areas of user regs */
+	int (*get_user_regs_area)(int, int, struct reg_area *);
+	int (*get_usr_offset)(ve_usr_reg_name_t, int *, off_t *);
+	size_t num_sys_regs_area;	/*!< # of areas of sys regs */
+	int (*get_sys_regs_area)(int, int, struct reg_area *);
+	int (*get_sys_offset)(ve_sys_reg_name_t, int *, off_t *);
+	size_t num_common_regs_area;	/*!< # of areas of common regs */
+	int (*get_common_regs_area)(int, struct reg_area *);
+	int (*create_wait_irq)(vedl_interrupt_entry_t, struct ve_wait_irq **);
+	int (*update_firmware)(vedl_handle *handle);
+	int (*wait_interrupt)(vedl_handle *handle, int msix_entry,
+			      struct timespec *timeout);
+	int (*request_ownership)(vedl_handle *handle, int timeout);
+	int (*release_ownership)(vedl_handle *handle);
+	int (*notify_fault)(vedl_handle *handle);
+	int (*get_exs_register)(vedl_handle *handle, ve_reg_t *exs);
+	int (*complete_memclear)(vedl_handle *handle);
+	int (*handle_clock_gating)(vedl_handle *handle, int flags);
+	int (*get_clock_gating_state)(vedl_handle *handle, uint64_t *state);
+};
 
-/**
- * @brief Check size and offset of MMIO of 1 word (8 bytes)
- *
- * @param offset offset from top address
- * @param size size to transfer
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
- */
-static inline int _check_size_offset_word(off_t offset, size_t size)
-{
-	/* size must be 8byte */
-	if (size != 8)
-		return -1;
-	/* offset must be 8byte align */
-	if (offset % 8 || offset < 0)
-		return -2;
-	return 0;
-}
+#define VEDL_ARCH_CLASS(name_) static const struct vedl_arch_class \
+	* _arch_classes_ ##  name_ ## _ptr \
+	__attribute__((__section__("arch_classes"), __used__)) = &(name_)
+extern const struct vedl_arch_class *__start_arch_classes;
+extern const struct vedl_arch_class *__stop_arch_classes;
 
-/**
- * @brief read register
- *
- * @param[in] handle VEDL handler
- * @param[in] from_addr register mapped address
- * @param offset offset from from_addr
- * @param[out] to_addr buffer for writing
- * @param size size to read
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
- */
-static inline int _read_reg(vedl_handle *handle, void *from_addr,
-			     off_t offset, void *to_addr, size_t size)
-{
-	int err = 0;
+#if defined(_VE_ARCH_VE3_)
+#include "internal_ve3.h"
+#elif defined(_VE_ARCH_VE1_)
+#include "internal_ve1.h"
 
-#ifdef NO_MEMCPY
-	size_t now;
-	uint64_t *from8 = (uint64_t *)(from_addr + offset);
-	uint64_t *to8 = (uint64_t *)to_addr;
 #endif
-
-	err = _check_size_offset(offset, size);
-	if (err)
-		return err;
-	/* read reg */
-#ifdef NO_MEMCPY
-	for (now = 0; now < size; now += 8)
-		*to8++ = *from8++;
-#else
-
-	if(size <= 4096 && is_ssse3() ){
-		memcpy(to_addr, (void *)(from_addr + offset), size);
-	} else {
-		rep_movs(to_addr, (void *)(from_addr + offset), size);
-	}
-#endif
-
-	return 0;
-}
-
-/**
- * @brief read register 1 word
- *
- * @param[in] handle VEDL handler
- * @param[in] from_addr register mapped address
- * @param offset offset from from_addr
- * @param[out] to_addr buffer for writing
- * @param size size to read (must be 8 bytes)
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
- */
-static inline int _read_reg_word(vedl_handle *handle, void *from_addr,
-			     off_t offset, void *to_addr, size_t size)
-{
-	int err = 0;
-	uint64_t *from8 = (uint64_t *)(from_addr + offset);
-	uint64_t *to8 = (uint64_t *)to_addr;
-
-	err = _check_size_offset_word(offset, size);
-	if (err)
-		return err;
-	*to8 = *from8;
-	return 0;
-}
-
-/**
- * @brief write register
- *
- * @param[in] handle VEDL handler
- * @param[in] to_addr register mapped address
- * @param offset offset from to_addr
- * @param[in] from_addr buffer for writing
- * @param size size to write
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
- */
-static inline int _write_reg(vedl_handle *handle, void *to_addr,
-			      off_t offset, void *from_addr, size_t size)
-{
-	int err = 0;
-
-#ifdef NO_MEMCPY
-	size_t now;
-	uint64_t *to8 = (uint64_t *)(to_addr + offset);
-	uint64_t *from8 = (uint64_t *)from_addr;
-#endif
-
-	err = _check_size_offset(offset, size);
-	if (err)
-		return err;
-	/* write reg */
-#ifdef NO_MEMCPY
-	for(now = 0; now < size; now +=8)
-		*to8++ = *from8++;	
-#else
-
-	if(size <= 4096 && is_ssse3() ){
-		memcpy((void *)(to_addr + offset), from_addr, size);
-	} else {
-		rep_movs((void *)(to_addr + offset), from_addr, size);
-	}
-#endif
-
-	return 0;
-}
-
-/**
- * @brief write register 1 word
- *
- * @param[in] handle VEDL handler
- * @param[in] to_addr register mapped address
- * @param offset offset from to_addr
- * @param[in] from_addr buffer for writing
- * @param size size to write (must be 8 bytes)
- *
- * @return 0 on success.
- *         -1 on invalid size
- *         -2 on invalid offset
- */
-static inline int _write_reg_word(vedl_handle *handle, void *to_addr,
-			      off_t offset, void *from_addr, size_t size)
-{
-	int err = 0;
-	uint64_t *to8 = (uint64_t *)(to_addr + offset);
-	uint64_t *from8 = (uint64_t *)from_addr;
-
-	err = _check_size_offset_word(offset, size);
-	if (err)
-		return err;
-	*to8 = *from8;
-	return 0;
-}
-
-/**
- * @brief return offset of core_user_reg_t (internal function)
- *
- * @param[in] reg register
- *
- * @return offset on success. -1 on failure.
- */
-static inline off_t __get_usr_reg_offset(usr_reg_name_t reg)
-{
-	switch ((usr_reg_name_t)reg) {
-	case USRCC:
-		return offsetof(core_user_reg_t, USRCC);
-	case PSW:
-		return offsetof(core_user_reg_t, PSW);
-	case EXS:
-		return offsetof(core_user_reg_t, EXS);
-	case IC:
-		return offsetof(core_user_reg_t, IC);
-	case ICE:
-		return offsetof(core_user_reg_t, ICE);
-	case VIXR:
-		return offsetof(core_user_reg_t, VIXR);
-	case VL:
-		return offsetof(core_user_reg_t, VL);
-	case SAR:
-		return offsetof(core_user_reg_t, SAR);
-	case PMMR:
-		return offsetof(core_user_reg_t, PMMR);
-	default:
-		if ((reg >= PMCR00) && (reg <= PMCR04))
-			return offsetof(core_user_reg_t, PMCR[reg - PMCR00]);
-		if ((reg >= PMC00) && (reg <= PMC15))
-			return offsetof(core_user_reg_t, PMC[reg - PMC00]);
-		if ((reg >= SR00) && (reg <= SR63))
-			return offsetof(core_user_reg_t, SR[reg - SR00]);
-	}
-	return -1;
-}
-
-/**
- * @brief return offset of core_system_reg_t (internal function)
- *
- * @param[in] reg register
- *
- * @return offset on success. -1 on failure.
- */
-static inline off_t __get_sys_reg_offset(sys_reg_name_t reg)
-{
-	switch (reg) {
-	case EXSRAR:
-		return offsetof(core_system_reg_t, EXSRAR);
-	case HCR:
-		return offsetof(core_system_reg_t, HCR);
-	case JIDR:
-		return offsetof(core_system_reg_t, JIDR);
-	case DIDR:
-		return offsetof(core_system_reg_t, DIDR);
-	default:
-		if ((reg >= CRD00) && (reg <= CRD03))
-			return offsetof(core_system_reg_t, CRD[reg - CRD00]);
-	}
-	return -1;
-}
-
-/**
- * @brief get offset of specific register
- *
- * @param[in] type register type
- * @param[in] reg specific register
- *
- * @return offset on success. negative on failure.
- */
-static inline off_t _get_reg_offset(reg_type_t type, int reg)
-{
-	off_t offset = -1;
-
-	switch (type) {
-	case USR_REG:
-		offset = __get_usr_reg_offset((usr_reg_name_t)reg);
-		break;
-	case SYS_REG:
-		offset = __get_sys_reg_offset((sys_reg_name_t)reg);
-		break;
-	}
-
-	return offset;
-}
-
 #endif				/* if !defined(__LIBVED_INTERNAL_H) */

@@ -21,489 +21,378 @@
 
 /**
  * @file  register.c
- * @brief VE Driver library register access functions
+ * @brief VE Driver library architecture-independent register access functions
  */
 
 #define _GNU_SOURCE
-#include "ve_drv.h"
-#include "vp.h"
+#include <errno.h>
 #include "libved.h"
 #include "internal.h"
+#include "register.h"
 
 /**
- * @brief get specific user register (8 Byte register)
+ * \addtogroup VEDL API
+ */
+//@{
+/**
+ * @brief get the size of user register area
  *
- * @param[in] handle VEDL handle
- * @param[in] addr head of mapped address of core user register
- * @param reg specific register
- * @param[out] regdata readed data will be stored here
+ * @param[in] reg core user register handle
+ * @param area_id user register area ID
+ *
+ * @return size of user register area; zero upon failure.
+ */
+size_t vedl_get_usr_reg_size(const vedl_user_reg_handle *reg, int area_id)
+{
+	if (area_id < 0 || reg->user_regs.num_areas <= area_id)
+		return 0;
+	return reg->user_regs.areas[area_id].size;
+}
+
+/**
+ * @brief get user register
+ *
+ * @param[in] from core user register handle
+ * @param area_id user register area ID
+ * @param offset offset from top of core user register
+ * @param[out] to register value will be stored here
+ * @param size register size to get
+ *
+ * @return 0 on success. negative on failure.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+int vedl_get_usr_reg_words(const vedl_user_reg_handle *from, int area_id,
+		off_t offset, void *to, size_t size)
+{
+	return _read_reg(from->user_regs.areas[area_id].start, offset,
+				to, size);
+}
+
+/**
+ * @brief get specified user register (8 Byte register)
+ *
+ * @param[in] from core user register handle
+ * @param reg register name
+ * @param[out] regdata buffer to read
  *
  * @return 0 on success. negative on failure.
  *         -3 when specified register is invalid
  */
-int vedl_get_usr_reg(vedl_handle *handle, core_user_reg_t *addr,
-		     usr_reg_name_t reg, reg_t *regdata)
+int vedl_get_usr_reg(const vedl_user_reg_handle *from,
+		     ve_usr_reg_name_t reg, ve_reg_t *regdata)
 {
 	off_t offset;
+	int area_id;
+	int rv = from->get_usr_offset(reg, &area_id, &offset);
 
-	offset = _get_reg_offset(USR_REG, (int)reg);
-	if (offset < 0)
+	if (rv < 0)
 		return -3;
 
-	return _read_reg_word(handle, addr, offset, regdata,
-			sizeof(reg_t));
+	return _read_reg_word(from->user_regs.areas[area_id].start, offset,
+				regdata);
 }
 
 /**
  * @brief get all user register
  *
- * @param[in] handle VEDL handle
- * @param[in] from head of mapped address of core user register
- * @param[out] to readed data will be stored here.
+ * @param[in] from core user register handle
+ * @param area_id core user register area ID
+ * @param[out] to buffer to read register data
+ * @param size of buffer
  *
  * @return 0 on success. negative on failure.
  */
-int vedl_get_usr_reg_all(vedl_handle *handle, core_user_reg_t *from,
-			 core_user_reg_t *to)
+int vedl_get_usr_reg_all(const vedl_user_reg_handle *from, int area_id,
+			 void *to, size_t size)
 {
-	size_t reg_size = offsetof(core_user_reg_t, VR) + sizeof(from->VR);
+	size_t reg_size = vedl_get_usr_reg_size(from, area_id);
+	if (reg_size == 0 || size != reg_size)
+		return -EINVAL;
 
-	return vedl_get_usr_reg_words(handle, from, 0, to, reg_size);
+	return vedl_get_usr_reg_words(from, area_id, 0, to, reg_size);
 }
 
 /**
- * @brief set specific core user register (8 Byte register)
+ * @brief set user register
  *
- * @param[in] handle VEDL handle
- * @param[in] addr head of mapped address of core user register
- * @param reg specific register
+ * @param[out] to core user register handle
+ * @param area_id core user register area ID
+ * @param offset offset of register from top of core user register
+ * @param[in] from value to set
+ * @param size size to set
+ *
+ * @return 0 on success. negative on failure.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+int vedl_set_usr_reg_words(vedl_user_reg_handle *to, int area_id,
+		off_t offset, const void *from, size_t size)
+{
+	return _write_reg(to->user_regs.areas[area_id].start, offset,
+				from, size);
+}
+
+/**
+ * @brief set specified core user register (8 Byte register)
+ *
+ * @param[in] to core user register handle
+ * @param reg register name
  * @param regdata register data to store
  *
  * @return 0 on success. negative on failure.
  *         -3 when specified register is invalid
  */
-int vedl_set_usr_reg(vedl_handle *handle, core_user_reg_t *addr,
-		     usr_reg_name_t reg, reg_t regdata)
+int vedl_set_usr_reg(vedl_user_reg_handle *to, ve_usr_reg_name_t reg,
+			ve_reg_t regdata)
 {
 	off_t offset;
+	int area_id;
+	int rv = to->get_usr_offset(reg, &area_id, &offset);
 
-	offset = _get_reg_offset(USR_REG, (int)reg);
-	if (offset < 0)
+	if (rv < 0)
 		return -3;
 
-	return _write_reg_word(handle, addr, offset, &regdata,
-			sizeof(reg_t));
+	return _write_reg_word(to->user_regs.areas[area_id].start, offset,
+				&regdata);
 }
 
 /**
  * @brief set all core user register
  *
- * @param[in] handle VEDL handler
- * @param[in] to head of mapped address of core user register
- * @param[in] from head of core_user_reg_t
+ * @param[in] to core user register handle
+ * @param area_id core user register area ID
+ * @param[in] from buffer to write data
+ * @param size size of buffer
  *
  * @return 0 on success. negative on failure.
  */
-int vedl_set_usr_reg_all(vedl_handle *handle, core_user_reg_t *to,
-			 core_user_reg_t *from)
+int vedl_set_usr_reg_all(vedl_user_reg_handle *to, int area_id,
+			 const void *from, size_t size)
 {
-	size_t reg_size = offsetof(core_user_reg_t, VR) + sizeof(from->VR);
+	size_t reg_size = vedl_get_usr_reg_size(to, area_id);
+	if (reg_size == 0 || size != reg_size)
+		return -EINVAL;
 
-	return vedl_set_usr_reg_words(handle, to, 0, from, reg_size);
+	return vedl_set_usr_reg_words(to, area_id, 0, from, reg_size);
 }
 
 /**
- * @brief get specific system register (8 Byte register)
+ * @brief get the size of system register area
  *
- * @param[in] handle VEDL handle
- * @param[in] addr head of mapped address of core system register
- * @param reg specific register
- * @param[out] regdata readed data will be stored here
+ * @param[in] reg core system register handle
+ * @param area_id system register area ID
+ *
+ * @return size of user register area; zero upon failure.
+ */
+size_t vedl_get_sys_reg_size(const vedl_sys_reg_handle *reg, int area_id)
+{
+	if (area_id < 0 || reg->sys_regs.num_areas <= area_id)
+		return 0;
+	return reg->sys_regs.areas[area_id].size;
+}
+
+/**
+ * @brief get system register
+ *
+ * @param[in] from core system register handle
+ * @param area_id system register area ID
+ * @param offset offset from top of core system register
+ * @param[out] to register value will be stored here
+ * @param size register size to get
+ *
+ * @return 0 on success. negative on failure.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+int vedl_get_sys_reg_words(const vedl_sys_reg_handle *from, int area_id,
+		off_t offset, void *to, size_t size)
+{
+	return _read_reg(from->sys_regs.areas[area_id].start, offset,
+				to, size);
+}
+
+/**
+ * @brief get specified system register (8 Byte register)
+ *
+ * @param[in] from core system register handle
+ * @param reg register name
+ * @param[out] regdata buffer to read
  *
  * @return 0 on success. negative on failure.
  *         -3 when specified register is invalid
  */
-int vedl_get_sys_reg(vedl_handle *handle, core_system_reg_t *addr,
-		     sys_reg_name_t reg, reg_t *regdata)
+int vedl_get_sys_reg(const vedl_sys_reg_handle *from,
+		     ve_sys_reg_name_t reg, ve_reg_t *regdata)
 {
 	off_t offset;
+	int area_id;
+	int rv = from->get_sys_offset(reg, &area_id, &offset);
 
-	offset = _get_reg_offset(SYS_REG, (int)reg);
-	if (offset < 0)
+	if (rv < 0)
 		return -3;
 
-	return _read_reg_word(handle, addr, offset, regdata,
-			sizeof(reg_t));
+	return _read_reg_word(from->sys_regs.areas[area_id].start, offset,
+				regdata);
 }
 
 /**
  * @brief get all system register
  *
- * @param[in] handle VEDL handle
- * @param[in] from head of mapped address of core system register
- * @param[out] to readed data will be stored here.
+ * @param[in] from core system register handle
+ * @param area_id core system register area ID
+ * @param[out] to buffer to read register data
+ * @param size of buffer
  *
  * @return 0 on success. negative on failure.
  */
-int vedl_get_sys_reg_all(vedl_handle *handle, core_system_reg_t *from,
-			 core_system_reg_t *to)
+int vedl_get_sys_reg_all(const vedl_sys_reg_handle *from, int area_id,
+			 void *to, size_t size)
 {
-	size_t reg_size = offsetof(core_system_reg_t, DIDR) +
-		sizeof(from->DIDR);
+	size_t reg_size = vedl_get_sys_reg_size(from, area_id);
+	if (reg_size == 0 || size != reg_size)
+		return -EINVAL;
 
-	return vedl_get_sys_reg_words(handle, from, 0, to, reg_size);
+	return vedl_get_sys_reg_words(from, area_id, 0, to, reg_size);
 }
 
 /**
- * @brief set specific system register (8 Byte register)
+ * @brief set system register
  *
- * @param[in] handle VEDL handle
- * @param[in] addr head of mapped address of core system register
- * @param reg specific register
- * @param[in] regdata register data to store
+ * @param[out] to core system register handle
+ * @param area_id core system register area ID
+ * @param offset offset of register from top of core system register
+ * @param[in] from value to set
+ * @param size size to set
  *
  * @return 0 on success. negative on failure.
- *         -3 on invalid reg
+ *         -1 on invalid size
+ *         -2 on invalid offset
  */
-int vedl_set_sys_reg(vedl_handle *handle, core_system_reg_t *addr,
-		     sys_reg_name_t reg, reg_t regdata)
+int vedl_set_sys_reg_words(vedl_sys_reg_handle *to, int area_id,
+		off_t offset, const void *from, size_t size)
+{
+	return _write_reg(to->sys_regs.areas[area_id].start, offset,
+				from, size);
+}
+
+/**
+ * @brief set specified system user register (8 Byte register)
+ *
+ * @param[in] to core system register handle
+ * @param reg register name
+ * @param regdata register data to store
+ *
+ * @return 0 on success. negative on failure.
+ *         -3 when specified register is invalid
+ */
+int vedl_set_sys_reg(vedl_sys_reg_handle *to, ve_sys_reg_name_t reg,
+			ve_reg_t regdata)
 {
 	off_t offset;
+	int area_id;
+	int rv = to->get_sys_offset(reg, &area_id, &offset);
 
-	offset = _get_reg_offset(SYS_REG, (int)reg);
-	if (offset < 0)
+	if (rv < 0)
 		return -3;
 
-	return _write_reg_word(handle, addr, offset, &regdata,
-			sizeof(reg_t));
+	return _write_reg_word(to->sys_regs.areas[area_id].start, offset,
+				&regdata);
 }
 
 /**
- * @brief set all system register
+ * @brief set all core system register
  *
- * @param[in] handle VEDL handle
- * @param[in] to head of mapped address of core system register
- * @param[in] from head of core_system_reg_t which contains
- *            register data to store
+ * @param[in] to core system register handle
+ * @param area_id core system register area ID
+ * @param[in] from buffer to write data
+ * @param size size of buffer
  *
  * @return 0 on success. negative on failure.
  */
-int vedl_set_sys_reg_all(vedl_handle *handle, core_system_reg_t *to,
-			 core_system_reg_t *from)
+int vedl_set_sys_reg_all(vedl_sys_reg_handle *to, int area_id,
+			 const void *from, size_t size)
 {
-	int ret;
-	size_t size;
-	off_t exsrar_off = offsetof(core_system_reg_t, EXSRAR);
-	size_t exsrar_size = sizeof(from->EXSRAR);
-	size_t reg_size = offsetof(core_system_reg_t, DIDR) +
-		sizeof(from->DIDR);
+	size_t reg_size = vedl_get_sys_reg_size(to, area_id);
+	if (reg_size == 0 || size != reg_size)
+		return -EINVAL;
 
-	size = (size_t)(exsrar_off - 0);
-	ret = vedl_set_sys_reg_words(handle, to, 0, from, size);
-	if (ret)
-		return ret;
-
-	/* skip EXSRAR (EXSRAR is set by VE Driver) */
-
-	to = (void *)to + exsrar_off + exsrar_size;
-	from = (void *)from + exsrar_off + exsrar_size;
-	size = (size_t)(reg_size - (exsrar_off + exsrar_size));
-	ret = vedl_set_sys_reg_words(handle, to, 0, from, size);
-
-	return ret;
+	return vedl_set_sys_reg_words(to, area_id, 0, from, reg_size);
 }
 
 /**
- * @brief update whole ATB (entire space)
+ * @brief get common register
  *
- * @param[in] handle VEDL handle
- * @param[in] addr head of core_system_reg_t which contains ATB to update
- * @param[in] atb ATB data to store
+ * @param[in] from system common register handle
+ * @param area_id system common register area ID
+ * @param offset offset from top of system common register
+ * @param[out] to buffer to read
+ * @param size size of buffer
  *
- * @return 0 on success. negative on failure.
+ * @return 0 on success.
+ *         -1 on invalid size
+ *         -2 on invalid offset
  */
-int vedl_update_atb_all(vedl_handle *handle, core_system_reg_t *addr,
-			atb_reg_t *atb)
+int vedl_get_cnt_reg_words(const vedl_common_reg_handle *from, int area_id,
+		off_t offset, void *to, size_t size)
 {
-	return vedl_set_sys_reg_words(handle, addr,
-			offsetof(core_system_reg_t, atb), atb,
-			sizeof(atb_reg_t));
-}
-
-/**
- * @brief update 1 ATB Space
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of core_system_reg_t which contains ATB to update
- * @param[in] atb ATB data to store
- * @param dirnum ATB directory number
- *
- * @return 0 on success. negative on failure.
- *         -3 when dirnum is invalid
- */
-int vedl_update_atb_dir(vedl_handle *handle, core_system_reg_t *addr,
-			atb_reg_t *atb, int dirnum)
-{
-	int ret;
-	off_t atb_offset;
-	off_t atb_dir_offset;
-	off_t atb_dir_entry_offset;
-
-	if (dirnum >= ATB_DIR_NUM)
-		return -3;
-
-	atb_offset = offsetof(core_system_reg_t, atb);
-	atb_dir_offset = atb_offset + offsetof(atb_reg_t, dir[dirnum]);
-	atb_dir_entry_offset = atb_offset + offsetof(atb_reg_t, entry[dirnum]);
-
-	/* update atb_dir_t */
-	ret = vedl_set_sys_reg_words(handle, addr, atb_dir_offset,
-			&atb->dir[dirnum], sizeof(atb_dir_t));
-	if (ret)
-		return ret;
-
-	/* update atb_entry_t */
-	ret = vedl_set_sys_reg_words(handle, addr, atb_dir_entry_offset,
-		   atb->entry[dirnum],
-		   sizeof(atb_entry_t) * ATB_ENTRY_MAX_SIZE);
-
-	return ret;
-}
-
-/**
- * @brief update 1 ATB Entry
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of core_system_reg_t which contains ATB to update
- * @param[in] entry ATB entry data to store
- * @param dirnum ATB directory number
- * @param entnum ATB entry number
- *
- * @return 0 on success. negative on failure.
- *         -3 when dirnum is invalid
- *         -4 when entnum is invalid
- */
-int vedl_update_atb_entry(vedl_handle *handle, core_system_reg_t *addr,
-			  atb_entry_t *entry, int dirnum, int entnum)
-{
-	off_t atb_offset;
-	off_t atb_entry_offset;
-
-	if (dirnum >= ATB_DIR_NUM)
-		return -3;
-	if (entnum >= ATB_ENTRY_MAX_SIZE)
-		return -4;
-
-	atb_offset = offsetof(core_system_reg_t, atb);
-	atb_entry_offset =
-	    atb_offset + offsetof(atb_reg_t, entry[dirnum][entnum]);
-
-	/* update 1 entry */
-	return _write_reg_word(handle, addr, atb_entry_offset, entry,
-		   sizeof(atb_entry_t));
+	return _read_reg(from->common_regs.areas[area_id].start, offset,
+				to, size);
 }
 
 /**
  * @brief get common register (8byte)
  *
- * @param[in] handle VEDL handle
- * @param[in] from head of mapped address of system common register
+ * @param[in] from system common register handle
+ * @param area_id system common register area ID
  * @param offset offset from top of system common register
- * @param[out] to register value will be sotred
- * @param size size to get
+ * @param[out] regdata buffer to read
  *
  * @return 0 on success. negative on failure.
  *         -2 on invalid offset
  */
-int vedl_set_cnt_reg_word(vedl_handle *handle, system_common_reg_t *to,
-		off_t offset, reg_t val)
+int vedl_get_cnt_reg_word(const vedl_common_reg_handle *from, int area_id,
+				off_t offset, ve_reg_t *regdata)
 {
-	return _write_reg_word(handle, to, offset, &val, sizeof(val));
+	return _read_reg_word(from->common_regs.areas[area_id].start, offset,
+			regdata);
+}
+
+/**
+ * @brief set common register
+ *
+ * @param[out] to system common register handle
+ * @param area_id system common register area ID
+ * @param offset offset from top of system common register
+ * @param[in] from buffer to write
+ * @param size size of buffer
+ *
+ * @return 0 on success.
+ *         -1 on invalid size
+ *         -2 on invalid offset
+ */
+int vedl_set_cnt_reg_words(vedl_common_reg_handle *to, int area_id,
+		off_t offset, const void *from, size_t size)
+{
+	return _write_reg(to->common_regs.areas[area_id].start, offset,
+				from, size);
 }
 
 /**
  * @brief set common register (8byte)
  *
- * @param[in] handle VEDL handle
- * @param[out] to head of mapped address of node control register
+ * @param[out] to system common register handle
+ * @param area_id system common register area ID
  * @param offset offset from top of system common register
- * @param[in] from the value to be stored
- * @param size size to set
+ * @param regdata register data to store
  *
  * @return 0 on success. negative on failure.
  *         -2 on invalid offset
  */
-int vedl_get_cnt_reg_word(vedl_handle *handle, system_common_reg_t *from,
-		off_t offset, reg_t *valp)
+int vedl_set_cnt_reg_word(vedl_common_reg_handle *to, int area_id,
+		off_t offset, ve_reg_t regdata)
 {
-	return _read_reg_word(handle, from, offset, valp,
-			sizeof(valp));
+	return _write_reg_word(to->common_regs.areas[area_id].start, offset,
+				&regdata);
 }
-
-/**
- * @brief get whole DMAATB
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t
- * @param[out] dmaatb buffer for storing DMAATB data
- *
- * @return 0 on success. negative on failure.
- */
-int vedl_get_dmaatb_all(vedl_handle *handle, system_common_reg_t *addr,
-			dmaatb_reg_t *dmaatb)
-{
-	return vedl_get_cnt_reg_words(handle, addr,
-			offsetof(system_common_reg_t, dmaatb),
-			dmaatb, sizeof(dmaatb_reg_t));
-}
-
-/**
- * @brief update whole DMAATB
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t which contains DMAATB to update
- * @param[in] dmaatb DMAATB data to store
- *
- * @return 0 on success. negative on failure.
- */
-int vedl_update_dmaatb_all(vedl_handle *handle, system_common_reg_t *addr,
-			   dmaatb_reg_t *dmaatb)
-{
-	return vedl_set_cnt_reg_words(handle, addr,
-			offsetof(system_common_reg_t, dmaatb),
-			dmaatb, sizeof(dmaatb_reg_t));
-}
-
-/**
- * @brief update 1 DMAATB Space
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t which contains DMAATB to update
- * @param[in] dmaatb DMAATB data to store
- * @param dirnum DMAATB directory number
- *
- * @return 0 on success. negative on failure.
- *         -3 when dirnum is invalid
- */
-int vedl_update_dmaatb_dir(vedl_handle *handle, system_common_reg_t *addr,
-			   dmaatb_reg_t *dmaatb, int dirnum)
-{
-	int ret;
-	off_t atb_offset;
-	off_t atb_dir_offset;
-	off_t atb_dir_entry_offset;
-
-	if (dirnum >= DMAATB_DIR_NUM)
-		return -3;
-
-	atb_offset = offsetof(system_common_reg_t, dmaatb);
-	atb_dir_offset = atb_offset + offsetof(dmaatb_reg_t, dir[dirnum]);
-	atb_dir_entry_offset = atb_offset + offsetof(dmaatb_reg_t,
-						     entry[dirnum]);
-
-	/* update atb_dir_t */
-	ret = vedl_set_cnt_reg_words(handle, addr, atb_dir_offset,
-			&dmaatb->dir[dirnum], sizeof(atb_dir_t));
-	if (ret)
-		return ret;
-
-	/* update atb_entry_t */
-	ret = vedl_set_cnt_reg_words(handle, addr, atb_dir_entry_offset,
-		   dmaatb->entry[dirnum],
-		   sizeof(atb_entry_t) * DMAATB_ENTRY_MAX_SIZE);
-
-	return ret;
-}
-
-/**
- * @brief update 1 DMAATB Entry
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t which contains DMAATB to update
- * @param[in] entry DMAATB entry data to store
- * @param dirnum DMAATB directory number
- * @param entnum DMAATB entry number
- *
- * @return 0 on success. negative on failure.
- *         -3 when dirnum is invalid
- *         -4 when entnum is invalid
- */
-int vedl_update_dmaatb_entry(vedl_handle *handle, system_common_reg_t *addr,
-			     atb_entry_t *entry, int dirnum, int entnum)
-{
-	off_t atb_offset;
-	off_t atb_entry_offset;
-
-	if (dirnum >= DMAATB_DIR_NUM)
-		return -3;
-	if (entnum >= DMAATB_ENTRY_MAX_SIZE)
-		return -4;
-
-	atb_offset = offsetof(system_common_reg_t, dmaatb);
-	atb_entry_offset = atb_offset + offsetof(dmaatb_reg_t,
-						 entry[dirnum][entnum]);
-
-	/* update 1 entry */
-	return _write_reg_word(handle, addr, atb_entry_offset, entry,
-		   sizeof(atb_entry_t));
-}
-
-/**
- * @brief get whole PCIATB
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t
- * @param[in] pciatb buffer for storing PCIATB
- *
- * @return 0 on success. negative on failure.
- */
-int vedl_get_pciatb_all(vedl_handle *handle, system_common_reg_t *addr,
-			pciatb_entry_t *pciatb)
-{
-	return vedl_get_cnt_reg_words(handle, addr,
-			offsetof(system_common_reg_t, pciatb), pciatb,
-			sizeof(pciatb_entry_t) * PCIATB_VLD_SIZE);
-}
-
-/**
- * @brief update whole PCIATB
- *
- * @param[in] handle VEDL handle
- * @param[in] addr head of system_common_reg_t which contains PCIATB to update
- * @param[in] pciatb PCIATB data to store
- *
- * @return 0 on success. negative on failure.
- */
-int vedl_update_pciatb_all(vedl_handle *handle, system_common_reg_t *addr,
-			   pciatb_entry_t *pciatb)
-{
-	return vedl_set_cnt_reg_words(handle, addr,
-			offsetof(system_common_reg_t, pciatb), pciatb,
-			sizeof(pciatb_entry_t) * PCIATB_VLD_SIZE);
-}
-
-/**
- * @brief update 1 PCIATB Entry
- *
- * @param[in] handle
- * @param[in] addr head of system_common_reg_t which contains PCIATB to update
- * @param[in] entry PCIATB entry data to store
- * @param entnum PCIATB entry number
- *
- * @return 0 on success. negative on failure.
- *         -3 when entnum is invalid
- */
-int vedl_update_pciatb_entry(vedl_handle *handle, system_common_reg_t *addr,
-			     pciatb_entry_t *entry, int entnum)
-{
-	off_t atb_entry_offset;
-
-	if (entnum >= PCIATB_EXT_SIZE)
-		return -3;
-
-	atb_entry_offset = offsetof(system_common_reg_t, pciatb[entnum]);
-
-	/* update 1 entry */
-	return _write_reg_word(handle, addr, atb_entry_offset, entry,
-		   sizeof(atb_entry_t));
-}
+//@}

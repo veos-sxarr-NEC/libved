@@ -18,9 +18,13 @@
 # License along with the VE Driver Library; if not, see
 # <http://www.gnu.org/licenses/>.
 #
-
 lib_LTLIBRARIES = libved.la
-libved_la_SOURCES = libved.c register.c register_common.c internal.h
+dist_noinst_DATA = libved.map
+libved_la_SOURCES = libved.c libved_ve1.c libved_ve3.c \
+                    register.h register.c register_ve1.c register_ve3.c \
+                    internal.h internal_ve1.h internal_ve3.h
 libved_la_CFLAGS = -std=gnu99 -O2
-libved_la_LDFLAGS = -version-info 1:0:0
-include_HEADERS = libved.h ve_hw.h
+libved_la_LDFLAGS = -version-info 3:0:0 \
+                   -Wl,--version-script=$(srcdir)/libved.map
+include_HEADERS = libved.h libved_ve1.h libved_ve3.h \
+                  ve_hw.h ve_hw_ve1.h ve_hw_ve3.h

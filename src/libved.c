@@ -1,7 +1,7 @@
 /*
  * VE Driver Library
  *
- * Copyright (C) 2017-2018 NEC Corporation
+ * Copyright (C) 2017-2020 NEC Corporation
  * This file is part of the VE Driver Library.
  *
  * The VE Driver Library is free software; you can redistribute it
@@ -26,7 +26,9 @@
 
 #define _GNU_SOURCE
 #include <unistd.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <libudev.h>
 #include <sys/mman.h>
@@ -38,6 +40,96 @@
 #include "ve_drv.h"
 #include "libved.h"
 #include "internal.h"
+
+/**
+ * \addtogroup VEDL API
+ *
+ * VE Driver API functions.
+ * To use VE Driver API functions, include "libved.h" header.
+ */
+//@{
+/**
+ * @brief Set syscall area offset.
+ *
+ * @param[in] handle VEDL handle
+ * @param offset SHM area offset assigned to thread
+ */
+void vedl_set_syscall_area_offset(vedl_handle *handle, off_t offset)
+{
+	handle->offset = offset;
+}
+
+/**
+ * @brief Get syscall area offset.
+ *
+ * @param[in] handle VEDL handle
+ * @return offset SHM area offset assigned to thread
+ */
+int vedl_get_syscall_area_offset(vedl_handle *handle)
+{
+	return handle->offset;
+}
+
+/**
+ * @brief Set SHM/LHM address
+ *
+ * @param[in] handle VEDL handler
+ * @param addr SHM/LHM address
+ *
+ */
+void vedl_set_shm_lhm_addr(vedl_handle *handle, void *addr)
+{
+	handle->lshm_addr = (uint64_t *)addr;
+}
+
+/**
+ * @brief Get systemcall number
+ *
+ * @param[in] handle VEDL handler
+ *
+ * @return systemcall number on success. -1 on failure.
+ */
+int vedl_get_syscall_num(vedl_handle *handle)
+{
+	return (*(uint64_t *)((char *)(handle->lshm_addr) + handle->offset));
+}
+
+/**
+ * @brief Get sysfs path associated with the handle
+ * @param[in] handle pointer of VE handler
+ *
+ * @return sysfs path string address on success.
+ *         NULL on failure.
+ */
+const char *vedl_get_sysfs_path(vedl_handle *handle)
+{
+	return udev_device_get_syspath(handle->udev);
+}
+/**
+ * @brief Get SHM/LHM address
+ *
+ * @param[in] handle VEDL handler
+ * @return SHM/LHM address
+ *
+ */
+uint64_t *vedl_get_shm_lhm_addr(const vedl_handle *handle)
+{
+	return handle->lshm_addr;
+}
+
+const struct vedl_arch_class *find_arch_class(char *name)
+{
+	char *s;
+	const struct vedl_arch_class **p;
+	/* remove \n */
+	s = strchr(name, '\n');
+	if (s)
+		*s = '\0';
+	for (p = &__start_arch_classes; p < &__stop_arch_classes; ++p)
+		if (strcmp((*p)->name, name) == 0)
+			return *p;
+	return NULL;
+}
 
 /**
  * @brief Aquire VE Driver Library handler
@@ -57,6 +149,7 @@ vedl_handle *vedl_open_ve(const char *filename, int fd)
 	struct stat sb;
 	struct udev *udev = udev_new();
 	char abi_buff[10];
+	char arch_class_buff[VEDRV_ARCH_CLASS_NAME_MAX];
 	long int abi_version;
 
 	handle = (vedl_handle *)malloc(sizeof(vedl_handle));
@@ -112,9 +205,25 @@ vedl_handle *vedl_open_ve(const char *filename, int fd)
 				abi_version, VEDRV_ABI_VERSION);
 		goto abi_err;
 	}
+	/* Find VE architecture class */
+	memset(arch_class_buff, 0, sizeof(arch_class_buff));
+	err = vedl_read_from_sysfs(handle, "ve_arch_class", arch_class_buff,
+					sizeof(arch_class_buff) - 1);
+	if (err) {
+		errsv = errno;
+		fprintf(stderr, "%s cannot find VE architecture class.\n",
+			strerror(errno));
+		goto find_arch_err;
+	}
+	handle->arch_class = find_arch_class(arch_class_buff);
+	if (handle->arch_class == NULL) {
+		fprintf(stderr, "libved does not support VE %s\n", filename);
+		goto find_arch_err;
+	}
 
 	return handle;
 
+ find_arch_err:
  abi_err:
 	udev_device_unref(handle->udev);
  udev_err:
@@ -189,7 +298,7 @@ vedl_handle *vedl_request_new_handle(vedl_handle *p_handle, const char *fname)
 /**
  * @brief Close VEDL handle
  *
- * @param[in] VEDL handle
+ * @param[in] handle VEDL handle
  *
  * @return 0 on success.
  *         -1 on failure.
@@ -212,7 +321,19 @@ int vedl_close_ve(vedl_handle *handle)
 }
 
 /**
- * @brief get syscall arguments
+ * @brief Get VE architecture class name
+ *
+ * @param[in] handle VEDL handle
+ *
+ * @return VE architecture class name
+ */
+const char *vedl_get_arch_class_name(const vedl_handle *handle)
+{
+	return handle->arch_class->name;
+}
+
+/**
+ * @brief Get syscall arguments
  *
  * @param[in] handle VEDL handle
  * @param[out] args argument lists
@@ -248,7 +369,7 @@ int vedl_get_syscall_args(vedl_handle *handle, uint64_t *args, int argnum)
  *                   is going to sleep
  *           EINTR   Interrupted by signal
  */
-int vedl_wait_exception(vedl_handle *handle, reg_t *exs)
+int vedl_wait_exception(vedl_handle *handle, ve_reg_t *exs)
 {
 	return ioctl(handle->vefd, VEDRV_CMD_WAIT_EXCEPTION, exs);
 }
@@ -400,7 +521,7 @@ static uint64_t do_get_dma_address(vedl_handle *handle, enum pd_list list_type,
  *
  * @param[in] handle VEDL handle
  * @param[in] addr virtual address to translate
- * @param pid_t PID to translate
+ * @param pid PID to translate
  * @param pin_down set 1 to pin down the page on the memory
  * @param write set 1 to check if the page is writable
  * @param[out] pfnmap function will set 1 if the address is IO mapped address
@@ -468,11 +589,11 @@ int vedl_get_addr_pin_blk(vedl_handle *handle, pid_t pid, uint64_t vaddr,
 }
 
 /**
- * @brief return physical address of process virtual address for MMM, T&D
+ * @brief Get physical address of process virtual address for MMM, T&D
  *
  * @param[in] handle VEDL handle
  * @param[in] addr virtual address to translate
- * @param pid_t PID to translate
+ * @param pid PID to translate
  * @param pin_down set 1 to pin down the page on the memory
  * @param write set 1 to check if the page is writable
  * @param[out] pfnmap function will set 1 if the address is IO mapped address
@@ -659,6 +780,14 @@ int vedl_read_from_sysfs(vedl_handle *handle, const char *fname, char *str,
 	return retval;
 }
 
+static int bar_valid(const vedl_handle *handle, int bar)
+{
+	if (bar < 0 || 6 <= bar)
+		return 0;
+	return (handle->arch_class->bars_map & (1 << bar)) != 0;
+}
+
+
 /**
  * @brief Get size of PCI BAR
  *
@@ -674,16 +803,15 @@ int vedl_read_from_sysfs(vedl_handle *handle, const char *fname, char *str,
 int vedl_get_pci_bar_size(vedl_handle *handle, uint64_t *size, int bar)
 {
 	char string[PATH_MAX];
+	char filename[sizeof("bar0_size")];
 	int retval;
 
-	switch (bar) {
-	case 0:
-		retval = vedl_read_from_sysfs(handle, "bar0_size", string,
-				PATH_MAX);
-		break;
-	default:
+	if (!bar_valid(handle, bar))
 		return -EINVAL;
-	}
+
+	snprintf(filename, sizeof(filename), "bar%d_size", bar);
+
+	retval = vedl_read_from_sysfs(handle, filename, string, PATH_MAX);
 	if (retval)
 		return -EIO;
 
@@ -766,20 +894,14 @@ long int vedl_get_num_of_core(vedl_handle *handle)
 int vedl_get_pci_bar_address(vedl_handle *handle, uint64_t *addr, int bar)
 {
 	char string[PATH_MAX];
+	char filename[sizeof("bar0_addr")];
 	int retval;
 
-	switch (bar) {
-	case 0:
-		retval = vedl_read_from_sysfs(handle, "bar0_addr", string,
-				PATH_MAX);
-		break;
-	case 3:
-		retval = vedl_read_from_sysfs(handle, "bar3_addr", string,
-				PATH_MAX);
-		break;
-	default:
+	if (!bar_valid(handle, bar))
 		return -EINVAL;
-	}
+
+	snprintf(filename, sizeof(filename), "bar%d_addr", bar);
+	retval = vedl_read_from_sysfs(handle, filename, string, PATH_MAX);
 	if (retval)
 		return -EIO;
 
@@ -895,13 +1017,42 @@ int vedl_release_pindown_page_blk(vedl_handle *handle, uint64_t *addr,
 }
 
 /**
- * @brief wait for interuption
+ * @brief wait for interrupt
  *
- * @detail
- * This function blocks until specified MSI-X entry interrupt occur.
+ * @details
+ * This function block until specified interrupt.
+ *
+ * @param[in] handle VEDL handle
+ * @param[in] cond low-level structure to specify an interrupt.
+ * @param[in] timeout timeout count
+ *
+ * @return 0 on success; netative on failure with errno set to:
+ *           ETIMEDOUT time expired;
+ *           EFAULT    a pointer in arguments is bad;
+ *           EINTR     interrupted by a signal.
+ */
+int vedl__wait_for_interrupt(vedl_handle *handle, struct ve_wait_irq *cond,
+			struct timespec *timeout)
+{
+	int retval = 0;
+	struct ve_wait_irq_arg arg;
+	arg.bits = cond;
+	arg.timeout = timeout;
+
+	retval = ioctl(handle->vefd, VEDRV_CMD_WAIT_INTR, &arg);
+	if (retval > 0)
+		return 0;
+	return retval;
+}
+
+/**
+ * @brief wait for an interupt
+ *
+ * @details
+ * This function blocks until a specified entry interrupt occur.
  *
  * @param[in] handle VEDL handler
- * @param msix_entry MSI-X entry number to wait
+ * @param entry interrupt entry number to wait
  * @param[in] timeout timeout count
  *
  * @return 0 on success. Negative on failure.
@@ -910,27 +1061,67 @@ int vedl_release_pindown_page_blk(vedl_handle *handle, uint64_t *addr,
  *	     EFAULT    invalid argument.
  *	     EINTR     receiving signal.
  */
-int vedl_wait_interrupt(vedl_handle *handle, msix_entry_t entry,
+int vedl_wait_for_interrupt(vedl_handle *handle, vedl_interrupt_entry_t entry,
 			struct timespec *timeout)
 {
 	int retval = 0;
-	struct ve_wait_irq_arg arg;
+	struct ve_wait_irq *cond;
 
-	arg.bits.lower = 0;
-	arg.bits.upper = 0;
-	arg.timeout = NULL;
-
-	if (entry < 64)
-		arg.bits.lower = 0x1ULL << entry;
-	else
-		arg.bits.upper = 0x1ULL << (entry - 64);
-	arg.timeout = timeout;
-
-	retval = ioctl(handle->vefd, VEDRV_CMD_WAIT_INTR, &arg);
-	if (retval > 0)
-		return 0;
-
+	retval = handle->arch_class->create_wait_irq(entry, &cond);
+	if (retval != 0) {
+		errno = retval;
+		return -1;
+	}
+	retval = vedl__wait_for_interrupt(handle, cond, timeout);
+	free(cond);
 	return retval;
+}
+
+static int init_reg_area_set(struct reg_area_set *rs, int n)
+{
+	rs->num_areas = n;
+	rs->areas = calloc(n, sizeof(*rs->areas));
+	if (rs->areas == 0)
+		return ENOMEM;
+	return 0;
+}
+
+static int map_core_reg_area_set(int fd, int core_id, struct reg_area_set *rs,
+			int (*get_area)(int, int, struct reg_area *))
+{
+	int i;
+	int rv = 0;
+	for (i = 0; i < rs->num_areas; ++i) {
+		struct reg_area ra;
+		rs->areas[i].start = MAP_FAILED;
+		(void)get_area(core_id, i, &ra);
+		rs->areas[i].size = ra.size;
+		void *p = mmap(NULL, ra.size, PROT_READ | PROT_WRITE,
+				MAP_SHARED, fd, ra.offset);
+		if (p == MAP_FAILED) {
+			rv = errno;
+			goto fail;
+		}
+		rs->areas[i].start = p;
+	}
+	return 0;
+ fail:
+	for (; i>= 0; --i) {
+		if (rs->areas[i].start != NULL)
+			munmap(rs->areas[i].start, rs->areas[i].size);
+	}
+	return rv;
+}
+
+static void unmap_reg_area_set(struct reg_area_set *rs)
+{
+	for (int i = 0; i < rs->num_areas; ++i)
+		munmap(rs->areas[i].start, rs->areas[i].size);
+}
+
+static void fini_reg_area_set(struct reg_area_set *rs)
+{
+	free(rs->areas);
 }
 
 /**
@@ -939,14 +1130,35 @@ int vedl_wait_interrupt(vedl_handle *handle, msix_entry_t entry,
  * @param[in] handle VEDL handler
  * @param core_id Physical VE core ID
  *
- * @return 0 on success. MAP_FAILED on failure.
+ * @return non-null handle on success. NULL on failure.
  */
-core_user_reg_t *vedl_mmap_usr_reg(vedl_handle *handle, int core_id)
+vedl_user_reg_handle *vedl_mmap_usr_reg(vedl_handle *handle, int core_id)
 {
-	return mmap(NULL, sizeof(core_user_reg_t),
-			PROT_READ | PROT_WRITE, MAP_SHARED,
-			handle->vefd, VEDRV_MAP_BAR2_OFFSET +
-			PCI_BAR2_CREG_SIZE * core_id);
+	int err;
+	vedl_user_reg_handle *rv;
+	rv = malloc(sizeof(*rv));
+	if (rv == NULL)
+		return rv;
+
+	int num_areas = handle->arch_class->num_user_regs_area;
+	err = init_reg_area_set(&rv->user_regs, num_areas);
+	if (err != 0)
+		goto err_init_reg_area_set;
+
+	err = map_core_reg_area_set(handle->vefd, core_id, &rv->user_regs,
+				handle->arch_class->get_user_regs_area);
+	if (err != 0)
+		goto err_map_reg_area_set;
+
+	rv->get_usr_offset = handle->arch_class->get_usr_offset;
+	return rv;
+
+ err_map_reg_area_set:
+	fini_reg_area_set(&rv->user_regs);
+ err_init_reg_area_set:
+	free(rv);
+	errno = err;
+	return NULL;
 }
 
 /**
@@ -955,14 +1167,35 @@ core_user_reg_t *vedl_mmap_usr_reg(vedl_handle *handle, int core_id)
  * @param[in] handle VEDL handle
  * @param core_id Physical VE core ID
  *
- * @return 0 on success. MAP_FAILED on failure.
+ * @return non-null handle on success. NULL on failure.
  */
-core_system_reg_t *vedl_mmap_sys_reg(vedl_handle *handle, int core_id)
+vedl_sys_reg_handle *vedl_mmap_sys_reg(vedl_handle *handle, int core_id)
 {
-	return mmap(NULL, sizeof(core_system_reg_t),
-			PROT_READ | PROT_WRITE, MAP_SHARED,
-			handle->vefd, VEDRV_MAP_BAR2_OFFSET +
-			PCI_BAR2_CREG_SIZE * core_id + sizeof(core_user_reg_t));
+	int err;
+	vedl_sys_reg_handle *rv;
+	rv = malloc(sizeof(*rv));
+	if (rv == NULL)
+		return rv;
+
+	int num_areas = handle->arch_class->num_sys_regs_area;
+	err = init_reg_area_set(&rv->sys_regs, num_areas);
+	if (err != 0)
+		goto err_init_reg_area_set;
+
+	err = map_core_reg_area_set(handle->vefd, core_id, &rv->sys_regs,
+				handle->arch_class->get_sys_regs_area);
+	if (err != 0)
+		goto err_map_reg_area_set;
+
+	rv->get_sys_offset = handle->arch_class->get_sys_offset;
+	return rv;
+
+ err_map_reg_area_set:
+	fini_reg_area_set(&rv->sys_regs);
+ err_init_reg_area_set:
+	free(rv);
+	errno = err;
+	return NULL;
 }
 
 /**
@@ -970,19 +1203,102 @@ core_system_reg_t *vedl_mmap_sys_reg(vedl_handle *handle, int core_id)
  *
  * @param[in] handle VE handle
  *
- * @return 0 on success. MAP_FAILED on failure.
+ * @return non-null handle on success. NULL on failure.
  */
-system_common_reg_t *vedl_mmap_cnt_reg(vedl_handle *handle)
+vedl_common_reg_handle *vedl_mmap_cnt_reg(vedl_handle *handle)
 {
-	return mmap(NULL, sizeof(system_common_reg_t),
-			PROT_READ | PROT_WRITE, MAP_SHARED,
-			handle->vefd, VEDRV_MAP_BAR2_OFFSET +
-			PCI_BAR2_SCR_OFFSET);
+	int err, i;
+	vedl_common_reg_handle *rv;
+	rv = malloc(sizeof(*rv));
+	if (rv == NULL)
+		return rv;
+
+	int num_areas = handle->arch_class->num_common_regs_area;
+	err = init_reg_area_set(&rv->common_regs, num_areas);
+	if (err != 0) {
+		goto err_init_reg_area_set;
+	}
+	for (i = 0; i < num_areas; ++i) {
+		struct reg_area ra;
+		rv->common_regs.areas[i].start = MAP_FAILED;
+		err = handle->arch_class->get_common_regs_area(i, &ra);
+		rv->common_regs.areas[i].size = ra.size;
+		void *p = mmap(NULL, ra.size, PROT_READ | PROT_WRITE,
+				MAP_SHARED, handle->vefd, ra.offset);
+		if (p == MAP_FAILED) {
+			err = errno;
+			goto err_map;
+		}
+		rv->common_regs.areas[i].start = p;
+	}
+	rv->arch_class = handle->arch_class;
+	return rv;
+
+ err_map:
+	for (; i>= 0; --i) {
+		if (rv->common_regs.areas[i].start != NULL)
+			munmap(rv->common_regs.areas[i].start,
+				rv->common_regs.areas[i].size);
+	}
+
+	fini_reg_area_set(&rv->common_regs);
+ err_init_reg_area_set:
+	free(rv);
+	errno = err;
+	return NULL;
+}
+
+/**
+ * @brief unmap core user register
+ *
+ * @param user_reg_handle core user register handle
+ *
+ * @return zero on success; non-zero on failure.
+ *
+ */
+int vedl_munmap_usr_reg(vedl_user_reg_handle *user_reg_handle)
+{
+	unmap_reg_area_set(&user_reg_handle->user_regs);
+	fini_reg_area_set(&user_reg_handle->user_regs);
+	free(user_reg_handle);
+	return 0;
+}
+
+/**
+ * @brief unmap core system register
+ *
+ * @param sys_reg_handle core system register handle
+ *
+ * @return zero on success; non-zero on failure.
+ *
+ */
+int vedl_munmap_sys_reg(vedl_sys_reg_handle *sys_reg_handle)
+{
+	unmap_reg_area_set(&sys_reg_handle->sys_regs);
+	fini_reg_area_set(&sys_reg_handle->sys_regs);
+	free(sys_reg_handle);
+	return 0;
+}
+
+/**
+ * @brief unmap system common register
+ *
+ * @param common_reg_handle system common register handle
+ *
+ * @return zero on success; non-zero on failure.
+ *
+ */
+int vedl_munmap_common_reg(vedl_common_reg_handle *common_reg_handle)
+{
+	unmap_reg_area_set(&common_reg_handle->common_regs);
+	fini_reg_area_set(&common_reg_handle->common_regs);
+	free(common_reg_handle);
+	return 0;
 }
 
 /**
  * @brief Unmap MMIO mmap
- * @detail This function will call unmap_mapping_range() to rip off
+ * @details This function will call unmap_mapping_range() to rip off
  *         the mapped page frame by VE Driver.
  *
  * @param[in] handle VEDL handle
@@ -1008,54 +1324,8 @@ int vedl_unmap_mmio(vedl_handle *handle, off_t offset, size_t size)
 }
 
 /**
- * @brief Update VE firmware
- * @detail This function will update VE firmware manually.
- *         Usually it's done automatically at the time of driver
- *         initialization.
- *         Please note that AER is disabled during updating.
- *
- * @param[in] handle VEDL handle
- *
- * @return 0 on success.
- *         Negative on failure.
- *         errno:
- *           EAGAIN on invalid VE state
- *           ENOMEM on lack of memory
- *           EINVAL on invalid argument
- *           EIO on failure of firmware update
- */
-int vedl_update_firmware(vedl_handle *handle)
-{
-	return ioctl(handle->vefd, VEDRV_CMD_UPDATE_FIRMWARE);
-}
-
-/**
- * @brief Reset VE Chip
- * @detail This function assert VE chip reset by using
- *         secondary bus reset or original reset method.
- *         After success, this function will update VE firmware.
- *         Please note that AER is disabled during reset.
- *
- * @param[in] handle VEDL handle
- * @param sbr set 1 to assert secondary bus reset.
- *            set 0 to use original reset method.
- *
- * @return 0 on success.
- *         Negative on failure.
- *         errno:
- *           EAGAIN on invalid VE state
- *           ENOMEM on lack of memory
- *           EINVAL on invalid argument
- *           EIO on failure of firmware update
- */
-int vedl_reset_ve_chip(vedl_handle *handle, int sbr)
-{
-	return ioctl(handle->vefd, VEDRV_CMD_VE_RESET, sbr);
-}
-
-/**
  * @brief Get host pid
- * @detail This function get the host pid which is converted
+ * @details This function get the host pid which is converted
  * 	   from namespace_pid. First, find name space from
  * 	   host_pid. After that, find task from name space
  * 	   and namespace_pid. Finaly, get the host pid which
@@ -1076,3 +1346,332 @@ pid_t vedl_host_pid(vedl_handle *handle, pid_t host_pid, pid_t namespace_pid)
 
 	return ioctl(handle->vefd, VEDRV_CMD_HOST_PID, &arg);
 }
+
+/**
+ * @brief Get file descriptor
+ * @details This function returns a file descriptor of VE device
+ *         bound to VEDL handle specified by the argument.
+ *
+ * @param[in] handle VEDL handle
+ *
+ * @return File descriptor of VE device.
+ */
+int vedl_get_fd(const vedl_handle *handle)
+{
+	return handle->vefd;
+}
+
+/**
+ * @brief Reset VE Chip
+ * 
+ * @details This function assert VE chip reset by using
+ *         secondary bus reset or original reset method.
+ *         function level reset only for Aurora3
+ *         After success, this function will update VE firmware.
+ *         Please note that AER is disabled during reset.
+ *
+ * @param[in] handle VEDL handle
+ * @param sbr set 0 to use original reset method.
+ *            set 1 to assert secondary bus reset.
+ *            set 2 to function level reset
+ * @return 0 on success.
+ *         Negative on failure.
+ *         errno:
+ *           EAGAIN on invalid VE state
+ *           ENOMEM on lack of memory
+ *           EINVAL on invalid argument
+ *           EIO on failure of firmware update
+ */
+int vedl_reset_ve_chip(vedl_handle *handle, int sbr)
+{
+	return ioctl(handle->vefd, VEDRV_CMD_VE_VE_RESET, sbr);
+}
+
+/**
+ * @brief Update VE firmware only Aurora1
+ *
+ * @details This function will update VE firmware manually.
+ *         Usually it's done automatically at the time of driver
+ *         initialization.
+ *         Please note that AER is disabled during updating.
+ *         for compatibilities with old libved
+ *
+ * @param[in] handle VEDL handle
+ *
+ * @return 0 on success.
+ *         Negative on failure.
+ *         errno:
+ *           EAGAIN on invalid VE state
+ *           ENOMEM on lack of memory
+ *           EINVAL on invalid argument
+ *           EIO on failure of firmware update
+ */
+int vedl_update_firmware(vedl_handle *handle)
+{
+	if (handle->arch_class->update_firmware)
+	  return handle->arch_class->update_firmware(handle);
+
+	errno = ENOTSUP;
+	return -1;
+}
+
+/**
+ * @brief wait for interuption only Aurora1
+ *
+ * @details
+ * This function blocks until specified MSI-X entry interrupt occur.
+ * for compatibilities with old libved
+ *
+ * @param[in] handle VEDL handler
+ * @param entry MSI-X entry number to wait
+ * @param[in] timeout timeout count
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           ETIMEDOUT time expired.
+ *           EFAULT    invalid argument.
+ *           EINTR     receiving signal.
+ */
+
+/*
+ * It can specify timeout.tv_sec lower MAX_WAIT_INTERRUPT
+ *
+ * #define HZ 1000                              refer param.h
+ * #define MAX_JIFFY_OFFSET ((LONG_MAX >> 1)-1) refer jiffies.h
+ * #define MAX_WAIT_INTERRUPT (MAX_JIFFY_OFFSET / HZ)
+ *   MAX_WAIT_INTERRUPT .==. 2147482
+*/
+#define MAX_WAIT_INTERRUPT 10
+
+int vedl_wait_interrupt(vedl_handle *handle, int entry,
+			   struct timespec *timeout)
+{
+	int ret;
+	struct timespec least_timeout, max_timeout;
+	uint64_t utv_sec;
+
+	if (handle->arch_class->wait_interrupt == NULL){
+		errno = ENOTSUP;
+		return -1;
+	}
+
+	if(timeout->tv_sec <= (uint64_t)(MAX_WAIT_INTERRUPT)) {
+		return handle->arch_class->wait_interrupt(handle, entry, timeout);
+	} else {
+		least_timeout.tv_sec = timeout->tv_sec;
+		least_timeout.tv_nsec = timeout->tv_nsec;
+		max_timeout.tv_sec = (time_t)(MAX_WAIT_INTERRUPT);
+		max_timeout.tv_nsec = (time_t)(0);
+		utv_sec =   (uint64_t)(timeout->tv_sec);
+		while (utv_sec > 0) {
+			ret = handle->arch_class->wait_interrupt(handle,
+							entry, &max_timeout);
+			if(ret == 0){
+				return ret;
+			}
+			if(errno != ETIMEDOUT) {
+				return ret;
+			}
+			errno = 0;
+			utv_sec -= MAX_WAIT_INTERRUPT;
+			if(utv_sec < MAX_WAIT_INTERRUPT) {
+				break;
+			}
+		}
+		if(utv_sec > 0) {
+			errno = 0;
+			least_timeout.tv_sec = (time_t)(utv_sec);
+			ret = handle->arch_class->wait_interrupt(handle,
+							entry, &least_timeout);
+		}
+		return ret;
+	}
+}
+
+/**
+ * @brief Clear EXSRAR target memory of core
+ *
+ * @details
+ * This function clear of EXSRAR of core
+ *
+ * @param[in] handle VEDL handle
+ * @param core_id Physical VE Core ID
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           EPERM   The caller is not permitted
+ *	     EINVAL  Invalid core_id.
+ */
+int vedl_reset_exsrar_mem(vedl_handle *handle, int core_id)
+{
+	return ioctl(handle->vefd, VEDRV_CMD_RST_EXSRAR_MEM, core_id);
+}
+
+
+/**
+ * @brief Notify fault to driver
+ *
+ * @details
+ * This function Notify Fault of VEOS to VE driver
+ * VE driver kill VEOS
+ *
+ * @param[in] handle VEDL handle
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_notify_fault(vedl_handle *handle) 
+{
+  if (handle->arch_class->notify_fault)
+    return handle->arch_class->notify_fault(handle);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+
+/**
+ * @brief Request ownership of VE driver
+ *
+ * @details
+ * This function request ownership of VE driver
+ *
+ * @param[in] handle VEDL handle
+ * @param[in] timeout timeout value
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_request_ownership(vedl_handle *handle, int timeout)
+{
+
+  if (handle->arch_class->request_ownership)
+    return handle->arch_class->request_ownership(handle, timeout);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+/**
+ * @brief Release ownership of VE driver
+ *
+ * @details
+ * This function release  ownership of VE driver
+ *
+ * @param[in] handle VEDL handle
+ * @param[in] timeout timeout value
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_release_ownership(vedl_handle *handle)
+{
+
+  if (handle->arch_class->release_ownership)
+    return handle->arch_class->release_ownership(handle);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+/**
+ * @brief get EXS Resgier
+ *
+ * @details
+ * This function get EXS Register
+ *
+ * @param[in] handle: VEDL handle
+ *
+ * @param[out] exs  : Pointing to the EXS register value
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           ENOSUP: not support
+ */
+
+int vedl_get_exs_register(vedl_handle *handle,ve_reg_t *exs)
+{
+
+  if (handle->arch_class->get_exs_register)
+    return handle->arch_class->get_exs_register(handle, exs);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+/**
+ * @brief complete memory clear
+ *
+ * @details
+ * This function  complete memory clear
+ *
+ * @param[in] handle VEDL handle
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_complete_memclear(vedl_handle *handle)
+{
+  if (handle->arch_class->complete_memclear)
+    return handle->arch_class->complete_memclear(handle);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+/**
+ * @brief handle clock gating
+ *
+ * @details
+ * This function  handle clock gating
+ *
+ * @param[in] handle VEDL handle
+ * @param[flag] clock state (1:on, 0:off)
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_handle_clock_gating(vedl_handle *handle, int flags)
+{
+  if (handle->arch_class->handle_clock_gating)
+    return handle->arch_class->handle_clock_gating(handle, flags);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+/**
+ * @brief get clock gating state
+ *
+ * @details
+ * This function  get clock gating state
+ *
+ * @param[in] handle VEDL handle
+ * @param[out] state  : Pointing to clock gating state value
+ *
+ *
+ * @return 0 on success. Negative on failure.
+ *         errno:
+ *           XXX
+ */
+int vedl_get_clock_gating_state(vedl_handle *handle, uint64_t *state)
+{
+  if (handle->arch_class->get_clock_gating_state)
+    return handle->arch_class->get_clock_gating_state(handle, state);
+
+  errno = ENOTSUP;
+  return -1;
+
+}
+
+//@}

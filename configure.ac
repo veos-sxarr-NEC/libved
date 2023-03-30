@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([libved], [2.8.0], [t-aoyama@ap.jp.nec.com])
+AC_INIT([libved], [3.0.1], [t-imai-cp@nec.com])
 AC_CONFIG_SRCDIR([src/libved.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([./build-aux])
@@ -34,14 +34,12 @@ CPPFLAGS=$CPPFLAGS" -I${with_veos}/include"
 AC_PROG_CC
 
 # Checks for libraries.
-# FIXME: Replace `main' with a function in `-lpthread':
-AC_CHECK_LIB([pthread], [main])
-# FIXME: Replace `main' with a function in `-ludev':
-AC_CHECK_LIB([udev], [main])
+AC_CHECK_LIB([udev], [udev_device_new_from_devnum])
 
 # Checks for header files.
 AC_CHECK_HEADERS([fcntl.h limits.h stddef.h stdlib.h string.h sys/ioctl.h unistd.h])
 AC_CHECK_HEADERS([ve_drv.h vp.h])
+AC_CHECK_HEADERS([ve_drv_ve1.h ve_drv_ve3_h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE

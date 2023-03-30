@@ -29,7 +29,7 @@ Source0:	@PACKAGE@-@VERSION@.tar.gz
 Vendor:		NEC Corporation
 Packager:	NEC Corporation
 BuildArch:	x86_64
-BuildRequires:	ve_drv-kmod-devel >= 0.4.1
+BuildRequires:	ve_drv-kmod-devel >= 3.0.0
 BuildRequires:	vp-kmod-devel >= 0.4.1
 BuildRequires:	systemd-devel >= 219
 BuildRequires:	glibc-headers >= 2.17
