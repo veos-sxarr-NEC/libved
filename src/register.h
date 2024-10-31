@@ -48,6 +48,8 @@ static inline int is_ssse3()
 	return bit_ssse3_on;
 }
 
+#define	MEMCP_TH_SIZE	0x800
+
 /**
  * @brief Check size and offset of MMIO
  *
@@ -121,7 +123,7 @@ static inline int _read_reg(const void *from_addr, off_t offset,
 	for (now = 0; now < size; now += 8)
 		*to8++ = *from8++;
 #else
-	if(size <= 4096 && is_ssse3() ){
+	if(size <= MEMCP_TH_SIZE && is_ssse3() ){
 		memcpy(to_addr, (void *)(from_addr + offset), size);
 	} else {
 		rep_movs(to_addr, (void *)(from_addr + offset), size);
@@ -212,7 +214,7 @@ static inline int _write_reg(void *to_addr, off_t offset,
 	for(now = 0; now < size; now +=8)
 		*to8++ = *from8++;	
 #else
-	if(size <= 4096 && is_ssse3() ){
+	if(size <= MEMCP_TH_SIZE && is_ssse3() ){
 		memcpy((void *)(to_addr + offset), from_addr, size);
 	} else {
 		rep_movs((void *)(to_addr + offset), from_addr, size);

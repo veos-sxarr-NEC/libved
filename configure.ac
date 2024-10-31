@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([libved], [3.0.1], [t-imai-cp@nec.com])
+AC_INIT([libved], [3.4.1], [t-imai-cp@nec.com])
 AC_CONFIG_SRCDIR([src/libved.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([./build-aux])
